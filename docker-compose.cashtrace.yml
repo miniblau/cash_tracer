@@ -31,6 +31,7 @@ services:
       - cashtrace-frontend
     networks:
       - cashtrace
+      - firefly_iii  # needed to resolve app:8080 for Firefly proxy
 
 volumes:
   caddy_data:    # persists TLS certificates
