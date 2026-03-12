@@ -1,6 +1,7 @@
 {$CASHTRACE_DOMAIN} {
-    reverse_proxy /api/* cashtrace-backend:8000 {
-        uri strip_prefix /api
+    handle /api/* {
+        rewrite * {path_trimprefix /api}
+        reverse_proxy cashtrace-backend:8000
     }
     reverse_proxy * cashtrace-frontend:3000
 }
