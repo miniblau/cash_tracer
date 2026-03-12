@@ -21,6 +21,7 @@ services:
       - "443:443/udp"  # HTTP/3
     environment:
       - CASHTRACE_DOMAIN=${CASHTRACE_DOMAIN}
+      - FIREFLY_DOMAIN=${FIREFLY_DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

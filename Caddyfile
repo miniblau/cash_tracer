@@ -4,3 +4,7 @@
     }
     reverse_proxy * cashtrace-frontend:3000
 }
+
+{$FIREFLY_DOMAIN} {
+    reverse_proxy app:8080
+}

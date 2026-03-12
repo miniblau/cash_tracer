@@ -52,7 +52,7 @@ Cash Trace is designed to run alongside an existing Firefly III Docker setup.
 1. Copy and configure the environment file:
    ```bash
    cp .env.cashtrace.example .env.cashtrace
-   # Set CASHTRACE_DOMAIN to your domain
+   # Set CASHTRACE_DOMAIN and FIREFLY_DOMAIN to your subdomains
    ```
 
 2. Deploy with Docker Compose:
@@ -65,7 +65,7 @@ This starts three containers:
 - **cashtrace-frontend** — SvelteKit served via adapter-node
 - **cashtrace-caddy** — Reverse proxy with automatic HTTPS via Let's Encrypt
 
-In the app login screen, use `http://app:8080` as the Firefly URL (Docker internal network).
+Firefly III has no direct port binding — Caddy fronts both services. In the app login screen, use your Firefly domain (e.g. `https://firefly.yourdomain.com`).
 
 ## Currency
 

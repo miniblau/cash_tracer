@@ -101,9 +101,9 @@ API docs at http://localhost:8000/docs when backend is running.
 
 Cash Trace runs alongside Firefly via `docker-compose.cashtrace.yml`. It joins the `firefly_iii` Docker network so the backend can reach Firefly at `http://app:8080`.
 
-Caddy handles HTTPS automatically via Let's Encrypt. Set `CASHTRACE_DOMAIN` in `.env.cashtrace` to your domain before deploying. TLS certificates are persisted in the `caddy_data` volume.
+Caddy handles HTTPS automatically via Let's Encrypt. Set both `CASHTRACE_DOMAIN` and `FIREFLY_DOMAIN` in `.env.cashtrace` before deploying. TLS certificates are persisted in the `caddy_data` volume.
 
-In the app login, use `http://app:8080` as the Firefly URL (internal Docker network).
+Firefly III has no direct port binding — Caddy fronts it at `FIREFLY_DOMAIN`. In the app login, use your Firefly domain (e.g. `https://firefly.yourdomain.com`).
 
 ## File Naming
 
