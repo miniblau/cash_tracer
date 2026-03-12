@@ -1,0 +1,42 @@
+services:
+  cashtrace-backend:
+    build: ./backend
+    restart: unless-stopped
+    networks:
+      - cashtrace
+      - firefly_iii  # shared with Firefly so backend can reach http://app:8080
+
+  cashtrace-frontend:
+    build: ./frontend
+    restart: unless-stopped
+    networks:
+      - cashtrace
+
+  cashtrace-caddy:
+    image: caddy:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    environment:
+      - CASHTRACE_DOMAIN=${CASHTRACE_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - cashtrace-backend
+      - cashtrace-frontend
+    networks:
+      - cashtrace
+
+volumes:
+  caddy_data:    # persists TLS certificates
+  caddy_config:
+
+networks:
+  cashtrace:
+    driver: bridge
+  firefly_iii:
+    external: true  # joins the existing Firefly network
