@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import httpx
 
-from .models import Receipt
+from .models import Deposit, Receipt
 
 
 class FireflyError(Exception):
@@ -63,6 +63,31 @@ class FireflyClient:
         }
         if len(splits) > 1:
             payload["group_title"] = receipt.store
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{self.base_url}/api/v1/transactions",
+                headers={**self.headers, "Content-Type": "application/json"},
+                json=payload,
+            )
+        resp.raise_for_status()
+        return resp.json()["data"]["id"]
+
+
+    async def push_deposit(self, deposit: Deposit) -> str:
+        """Submits an income deposit to Firefly. Returns the transaction ID."""
+        payload = {
+            "transactions": [{
+                "type": "deposit",
+                "date": deposit.date.isoformat(),
+                "description": deposit.source,
+                "amount": str(deposit.amount),
+                "currency_code": "SEK",
+                "category_id": deposit.category,
+                "source_name": deposit.source,
+                "destination_id": deposit.destination_account_id,
+                "tags": ["personal"],
+            }]
+        }
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{self.base_url}/api/v1/transactions",

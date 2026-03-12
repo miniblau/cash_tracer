@@ -1,52 +1,51 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/auth';
-	import { getCategories, getAccounts, submitReceipt } from '$lib/api';
+	import { getCategories, getAccounts, submitReceipt, submitDeposit } from '$lib/api';
 	import type { Category, Account, ReceiptItem } from '$lib/api';
+
+	type Tab = 'out' | 'in';
 
 	interface Item {
 		id: number;
 		name: string;
 		price: string;
-		category: string;  // defaults to receipt default; empty string means "use default"
+		category: string;
 		personal: boolean;
 	}
+
+	let tab = $state<Tab>('out');
 
 	let categories = $state<Category[]>([]);
 	let accounts = $state<Account[]>([]);
 	let loadError = $state('');
 
+	// --- Out (receipt) state ---
 	let store = $state('');
 	let date = $state(new Date().toISOString().slice(0, 10));
 	let total = $state('');
 	let categoryId = $state('');
 	let accountId = $state('');
 	let receiptPersonal = $state(false);
-
 	let nextId = 1;
 	let items = $state<Item[]>([]);
 
-	function newItem(): Item {
-		return { id: nextId++, name: '', price: '', category: '', personal: false };
-	}
-
-	function addItem() {
-		items = [...items, newItem()];
-	}
-
-	function removeItem(id: number) {
-		items = items.filter((i) => i.id !== id);
-	}
-
-	const itemsTotal = $derived(
-		items.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0)
-	);
-
+	const itemsTotal = $derived(items.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0));
 	const remainder = $derived((parseFloat(total) || 0) - itemsTotal);
 
+	// --- In (deposit) state ---
+	let depositSource = $state('');
+	let depositDate = $state(new Date().toISOString().slice(0, 10));
+	let depositAmount = $state('');
+	let depositCategoryId = $state('');
+	let depositAccountId = $state('');
+
+	// --- Shared submission state ---
 	let submitting = $state(false);
 	let submitError = $state('');
 	let successId = $state('');
+
+	function clearStatus() { submitError = ''; successId = ''; }
 
 	onMount(async () => {
 		if (!$auth) return;
@@ -55,19 +54,24 @@
 				getCategories($auth.fireflyUrl, $auth.token),
 				getAccounts($auth.fireflyUrl, $auth.token)
 			]);
-			if (categories.length) categoryId = categories[0].id;
-			if (accounts.length) accountId = accounts[0].id;
+			if (categories.length) { categoryId = categories[0].id; depositCategoryId = categories[0].id; }
+			if (accounts.length) { accountId = accounts[0].id; depositAccountId = accounts[0].id; }
 		} catch {
 			loadError = 'Failed to load data from Firefly.';
 		}
 	});
 
-	async function submit() {
-		if (!$auth) return;
-		submitting = true;
-		submitError = '';
-		successId = '';
+	function addItem() {
+		items = [...items, { id: nextId++, name: '', price: '', category: '', personal: false }];
+	}
 
+	function removeItem(id: number) {
+		items = items.filter((i) => i.id !== id);
+	}
+
+	async function submitOut() {
+		if (!$auth) return;
+		submitting = true; clearStatus();
 		const receiptItems: ReceiptItem[] = items
 			.filter((i) => i.price)
 			.map((i) => ({
@@ -76,12 +80,9 @@
 				action: receiptPersonal || i.personal ? 'personal' : 'categorize',
 				...(i.category ? { category_override: i.category } : {})
 			}));
-
 		try {
 			const id = await submitReceipt($auth.fireflyUrl, $auth.token, {
-				source: 'manual',
-				store,
-				date,
+				source: 'manual', store, date,
 				total: String(total),
 				default_category: categoryId,
 				source_account_id: accountId,
@@ -89,10 +90,27 @@
 				items: receiptItems
 			});
 			successId = id;
-			store = '';
-			total = '';
-			items = [];
-			receiptPersonal = false;
+			store = ''; total = ''; items = []; receiptPersonal = false;
+		} catch {
+			submitError = 'Failed to submit. Try again.';
+		} finally {
+			submitting = false;
+		}
+	}
+
+	async function submitIn() {
+		if (!$auth) return;
+		submitting = true; clearStatus();
+		try {
+			const id = await submitDeposit($auth.fireflyUrl, $auth.token, {
+				source: depositSource,
+				date: depositDate,
+				amount: String(depositAmount),
+				category: depositCategoryId,
+				destination_account_id: depositAccountId,
+			});
+			successId = id;
+			depositSource = ''; depositAmount = '';
 		} catch {
 			submitError = 'Failed to submit. Try again.';
 		} finally {
@@ -121,127 +139,150 @@
 		{:else if !accounts.length}
 			<p class="error">No asset accounts found in Firefly. Add at least one account to get started.</p>
 		{:else}
-			<form onsubmit={(e) => { e.preventDefault(); submit(); }}>
-
-				<!-- Receipt header -->
-				<div class="card header-card">
-					<div class="row">
-						<div class="field">
-							<label for="store">Store</label>
-							<input id="store" type="text" bind:value={store} placeholder="Store" required />
-						</div>
-						<div class="field">
-							<label for="date">Date</label>
-							<input id="date" type="date" bind:value={date} required />
-						</div>
-					</div>
-					<div class="field">
-						<label for="total">Amount (SEK)</label>
-						<input
-							id="total"
-							type="text"
-							inputmode="decimal"
-							bind:value={total}
-							placeholder="0.00"
-							required
-						/>
-					</div>
-					<div class="row">
-						<div class="field">
-							<label for="category">Category</label>
-							<select id="category" bind:value={categoryId}>
-								{#each categories as cat}
-									<option value={cat.id}>{cat.name}</option>
-								{/each}
-							</select>
-						</div>
-						<div class="field">
-							<label for="account">Account</label>
-							<select id="account" bind:value={accountId}>
-								{#each accounts as acc}
-									<option value={acc.id}>{acc.name}</option>
-								{/each}
-							</select>
-						</div>
-					</div>
-					<label class="personal-check">
-						<input type="checkbox" bind:checked={receiptPersonal} />
-						Personal receipt
-					</label>
-				</div>
-
-				<!-- Exception items -->
-				{#if items.length > 0}
-					<div class="items-list">
-						{#each items as item (item.id)}
-							<div class="card item-card">
-								<div class="item-top">
-									<input
-										class="item-name"
-										type="text"
-										bind:value={item.name}
-										placeholder="Item name"
-									/>
-									<input
-										class="item-price"
-										type="text"
-										inputmode="decimal"
-										bind:value={item.price}
-										placeholder="0.00"
-									/>
-									<button
-										type="button"
-										class="remove-btn"
-										onclick={() => removeItem(item.id)}
-										aria-label="Remove"
-									>×</button>
-								</div>
-
-								<div class="item-bottom">
-									<select bind:value={item.category} class="category-select">
-										<option value="">{categories.find(c => c.id === categoryId)?.name ?? '—'}</option>
-										{#each categories as cat}
-											<option value={cat.id}>{cat.name}</option>
-										{/each}
-									</select>
-
-									<label class="personal-check">
-										<input type="checkbox" bind:checked={item.personal} />
-										Personal
-									</label>
-								</div>
-							</div>
-						{/each}
-					</div>
-				{/if}
-
-				<button type="button" class="add-btn" onclick={addItem}>+ Add item</button>
-
-				<!-- Totals -->
-				{#if items.length > 0}
-					<div class="card total-card">
-						<div class="total-row">
-							<span class="total-label">Remainder</span>
-							<span class="total-amount" class:negative={remainder < 0}>{fmt(remainder)}</span>
-						</div>
-						<div class="total-row sub-row">
-							<span class="total-label">Items</span>
-							<span>{fmt(itemsTotal)}</span>
-						</div>
-					</div>
-				{/if}
-
-				{#if submitError}
-					<p class="error">{submitError}</p>
-				{/if}
-				{#if successId}
-					<p class="success">Saved to Firefly ✓</p>
-				{/if}
-
-				<button type="submit" class="btn btn-primary" disabled={submitting || remainder < 0}>
-					{submitting ? 'Saving…' : 'Save to Firefly'}
+			<div class="tabs">
+				<button class="tab" class:active={tab === 'out'} onclick={() => { tab = 'out'; clearStatus(); }}>
+					Out
 				</button>
-			</form>
+				<button class="tab" class:active={tab === 'in'} onclick={() => { tab = 'in'; clearStatus(); }}>
+					In
+				</button>
+			</div>
+
+			{#if tab === 'out'}
+				<form onsubmit={(e) => { e.preventDefault(); submitOut(); }}>
+					<div class="card header-card">
+						<div class="row">
+							<div class="field">
+								<label for="store">Store</label>
+								<input id="store" type="text" bind:value={store} placeholder="Store" required />
+							</div>
+							<div class="field">
+								<label for="date">Date</label>
+								<input id="date" type="date" bind:value={date} required />
+							</div>
+						</div>
+						<div class="field">
+							<label for="total">Amount (SEK)</label>
+							<input id="total" type="text" inputmode="decimal" bind:value={total} placeholder="0.00" required />
+						</div>
+						<div class="row">
+							<div class="field">
+								<label for="category">Category</label>
+								<select id="category" bind:value={categoryId}>
+									{#each categories as cat}
+										<option value={cat.id}>{cat.name}</option>
+									{/each}
+								</select>
+							</div>
+							<div class="field">
+								<label for="account">Account</label>
+								<select id="account" bind:value={accountId}>
+									{#each accounts as acc}
+										<option value={acc.id}>{acc.name}</option>
+									{/each}
+								</select>
+							</div>
+						</div>
+						<label class="personal-check">
+							<input type="checkbox" bind:checked={receiptPersonal} />
+							Personal receipt
+						</label>
+					</div>
+
+					{#if items.length > 0}
+						<div class="items-list">
+							{#each items as item (item.id)}
+								<div class="card item-card">
+									<div class="item-top">
+										<input class="item-name" type="text" bind:value={item.name} placeholder="Item name" />
+										<input class="item-price" type="text" inputmode="decimal" bind:value={item.price} placeholder="0.00" />
+										<button type="button" class="remove-btn" onclick={() => removeItem(item.id)} aria-label="Remove">×</button>
+									</div>
+									<div class="item-bottom">
+										<select bind:value={item.category} class="category-select">
+											<option value="">{categories.find(c => c.id === categoryId)?.name ?? '—'}</option>
+											{#each categories as cat}
+												<option value={cat.id}>{cat.name}</option>
+											{/each}
+										</select>
+										<label class="personal-check">
+											<input type="checkbox" bind:checked={item.personal} />
+											Personal
+										</label>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+
+					<button type="button" class="add-btn" onclick={addItem}>+ Add item</button>
+
+					{#if items.length > 0}
+						<div class="card total-card">
+							<div class="total-row">
+								<span class="total-label">Remainder</span>
+								<span class="total-amount" class:negative={remainder < 0}>{fmt(remainder)}</span>
+							</div>
+							<div class="total-row sub-row">
+								<span class="total-label">Items</span>
+								<span>{fmt(itemsTotal)}</span>
+							</div>
+						</div>
+					{/if}
+
+					{#if submitError}<p class="error">{submitError}</p>{/if}
+					{#if successId}<p class="success">Saved to Firefly ✓</p>{/if}
+
+					<button type="submit" class="btn btn-primary" disabled={submitting || remainder < 0}>
+						{submitting ? 'Saving…' : 'Save to Firefly'}
+					</button>
+				</form>
+
+			{:else}
+				<form onsubmit={(e) => { e.preventDefault(); submitIn(); }}>
+					<div class="card header-card">
+						<div class="row">
+							<div class="field">
+								<label for="dep-source">Source</label>
+								<input id="dep-source" type="text" bind:value={depositSource} placeholder="Employer" required />
+							</div>
+							<div class="field">
+								<label for="dep-date">Date</label>
+								<input id="dep-date" type="date" bind:value={depositDate} required />
+							</div>
+						</div>
+						<div class="field">
+							<label for="dep-amount">Amount (SEK)</label>
+							<input id="dep-amount" type="text" inputmode="decimal" bind:value={depositAmount} placeholder="0.00" required />
+						</div>
+						<div class="row">
+							<div class="field">
+								<label for="dep-category">Category</label>
+								<select id="dep-category" bind:value={depositCategoryId}>
+									{#each categories as cat}
+										<option value={cat.id}>{cat.name}</option>
+									{/each}
+								</select>
+							</div>
+							<div class="field">
+								<label for="dep-account">Account</label>
+								<select id="dep-account" bind:value={depositAccountId}>
+									{#each accounts as acc}
+										<option value={acc.id}>{acc.name}</option>
+									{/each}
+								</select>
+							</div>
+						</div>
+					</div>
+
+					{#if submitError}<p class="error">{submitError}</p>{/if}
+					{#if successId}<p class="success">Saved to Firefly ✓</p>{/if}
+
+					<button type="submit" class="btn btn-primary btn-income" disabled={submitting}>
+						{submitting ? 'Saving…' : 'Save to Firefly'}
+					</button>
+				</form>
+			{/if}
 		{/if}
 	</div>
 </main>
@@ -282,6 +323,36 @@
 		max-width: 480px;
 		width: 100%;
 		margin: 0 auto;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
+	/* Tabs */
+	.tabs {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		background: var(--color-surface);
+		border-radius: var(--radius);
+		box-shadow: var(--shadow);
+		overflow: hidden;
+	}
+
+	.tab {
+		padding: 0.75rem;
+		border: none;
+		background: none;
+		font-size: 0.95rem;
+		font-weight: 600;
+		color: var(--color-muted);
+		cursor: pointer;
+		transition: all 0.15s;
+		border-bottom: 2px solid transparent;
+	}
+
+	.tab.active {
+		color: var(--color-primary);
+		border-bottom-color: var(--color-primary);
 	}
 
 	form {
@@ -440,4 +511,10 @@
 		font-weight: 500;
 		text-align: center;
 	}
+
+	.btn-income {
+		background: #16a34a;
+	}
+
+	.btn-income:hover { background: #15803d; }
 </style>

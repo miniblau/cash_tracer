@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .firefly_client import FireflyClient, FireflyError
-from .models import Receipt, ReceiptItem
+from .models import Deposit, Receipt, ReceiptItem
 
 import os
 
@@ -38,6 +38,14 @@ class ReceiptItemSchema(BaseModel):
     price: Decimal
     action: Literal["accept", "categorize", "personal"] = "accept"
     category_override: str | None = None
+
+
+class DepositSchema(BaseModel):
+    source: str       # free-text revenue account name (e.g. "Employer")
+    date: date
+    amount: Decimal
+    category: str     # Firefly category ID
+    destination_account_id: str  # Firefly asset account ID
 
 
 class ReceiptSchema(BaseModel):
@@ -112,4 +120,23 @@ async def submit_receipt(
     )
 
     transaction_id = await client.push_transaction(receipt)
+    return {"firefly_transaction_id": transaction_id}
+
+
+@app.post("/deposit")
+async def submit_deposit(
+    body: DepositSchema,
+    firefly_url: str,
+    authorization: str = Header(...),
+):
+    token = authorization.removeprefix("Bearer ")
+    client = FireflyClient(firefly_url, token)
+    deposit = Deposit(
+        source=body.source,
+        date=body.date,
+        amount=body.amount,
+        category=body.category,
+        destination_account_id=body.destination_account_id,
+    )
+    transaction_id = await client.push_deposit(deposit)
     return {"firefly_transaction_id": transaction_id}

@@ -58,6 +58,28 @@ export async function getAccounts(fireflyUrl: string, token: string): Promise<Ac
 	return res.json();
 }
 
+export interface Deposit {
+	source: string;
+	date: string;
+	amount: string;
+	category: string;
+	destination_account_id: string;
+}
+
+export async function submitDeposit(
+	fireflyUrl: string,
+	token: string,
+	deposit: Deposit
+): Promise<string> {
+	const res = await fetch(`${BACKEND}/deposit?firefly_url=${encodeURIComponent(fireflyUrl)}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+		body: JSON.stringify(deposit)
+	});
+	if (!res.ok) throw new Error('Failed to submit deposit');
+	return (await res.json()).firefly_transaction_id;
+}
+
 export async function submitReceipt(
 	fireflyUrl: string,
 	token: string,

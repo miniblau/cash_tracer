@@ -13,6 +13,15 @@ class ReceiptItem:
 
 
 @dataclass
+class Deposit:
+    source: str       # Revenue account name (created in Firefly if it doesn't exist)
+    date: date
+    amount: Decimal   # SEK
+    category: str     # Firefly category ID
+    destination_account_id: str  # Firefly asset account ID
+
+
+@dataclass
 class Receipt:
     source: Literal["camera", "upload", "manual"]
     store: str
