@@ -1,0 +1,7 @@
+:8080 {
+    handle /api/* {
+        uri strip_prefix /api
+        reverse_proxy cashtrace-backend:8000
+    }
+    reverse_proxy * cashtrace-frontend:3000
+}
