@@ -114,8 +114,12 @@
 	<div class="content">
 		{#if loadError}
 			<p class="error">{loadError}</p>
-		{:else if !categories.length || !accounts.length}
+		{:else if !categories.length && !accounts.length}
 			<p class="loading">Loading…</p>
+		{:else if !categories.length}
+			<p class="error">No categories found in Firefly. Add at least one category to get started.</p>
+		{:else if !accounts.length}
+			<p class="error">No asset accounts found in Firefly. Add at least one account to get started.</p>
 		{:else}
 			<form onsubmit={(e) => { e.preventDefault(); submit(); }}>
 
