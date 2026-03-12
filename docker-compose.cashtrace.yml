@@ -40,4 +40,5 @@ networks:
   cashtrace:
     driver: bridge
   firefly_iii:
-    external: true  # joins the existing Firefly network
+    external: true
+    name: cash_trace_firefly_iii
