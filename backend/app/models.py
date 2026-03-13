@@ -29,6 +29,7 @@ class Receipt:
     total: Decimal  # The actual receipt total paid
     default_category: str  # Firefly category ID
     source_account_id: str  # Firefly asset account ID
+    description: str | None = None  # Optional note shown in Firefly; falls back to store name
     personal: bool = False  # If True, entire receipt is tagged personal
     items: list[ReceiptItem] = field(default_factory=list)  # Exception items only
 

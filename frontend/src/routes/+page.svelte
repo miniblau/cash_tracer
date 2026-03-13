@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/auth';
-	import { getCategories, getAccounts, submitReceipt, submitDeposit } from '$lib/api';
+	import { getCategories, getAccounts, getExpenseAccounts, createCategory, submitReceipt, submitDeposit } from '$lib/api';
 	import type { Category, Account, ReceiptItem } from '$lib/api';
 
 	type Tab = 'out' | 'in';
@@ -18,10 +18,14 @@
 
 	let categories = $state<Category[]>([]);
 	let accounts = $state<Account[]>([]);
+	let expenseAccounts = $state<Account[]>([]);
 	let loadError = $state('');
 
 	// --- Out (receipt) state ---
-	let store = $state('');
+	let newStore = $state(false);       // toggle: pick existing vs free-text
+	let store = $state('');             // free-text (newStore=true) or existing account name
+	let storeAccountId = $state('');    // existing expense account id (newStore=false)
+	let description = $state('');
 	let date = $state(new Date().toISOString().slice(0, 10));
 	let total = $state('');
 	let categoryId = $state('');
@@ -30,8 +34,10 @@
 	let nextId = 1;
 	let items = $state<Item[]>([]);
 
-	const itemsTotal = $derived(items.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0));
-	const remainder = $derived((parseFloat(total) || 0) - itemsTotal);
+	// --- Category creation ---
+	let addingCategory = $state(false);
+	let newCategoryName = $state('');
+	let creatingCategory = $state(false);
 
 	// --- In (deposit) state ---
 	let depositSource = $state('');
@@ -45,21 +51,48 @@
 	let submitError = $state('');
 	let successId = $state('');
 
+	const itemsTotal = $derived(items.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0));
+	const remainder = $derived((parseFloat(total) || 0) - itemsTotal);
+
+	// The store name to send — either free text or the selected account's name
+	const storeName = $derived(
+		newStore ? store : (expenseAccounts.find(a => a.id === storeAccountId)?.name ?? '')
+	);
+
 	function clearStatus() { submitError = ''; successId = ''; }
 
 	onMount(async () => {
 		if (!$auth) return;
 		try {
-			[categories, accounts] = await Promise.all([
+			[categories, accounts, expenseAccounts] = await Promise.all([
 				getCategories($auth.fireflyUrl, $auth.token),
-				getAccounts($auth.fireflyUrl, $auth.token)
+				getAccounts($auth.fireflyUrl, $auth.token),
+				getExpenseAccounts($auth.fireflyUrl, $auth.token),
 			]);
 			if (categories.length) { categoryId = categories[0].id; depositCategoryId = categories[0].id; }
 			if (accounts.length) { accountId = accounts[0].id; depositAccountId = accounts[0].id; }
+			if (expenseAccounts.length) storeAccountId = expenseAccounts[0].id;
+			else newStore = true; // no known stores yet, default to free text
 		} catch {
 			loadError = 'Failed to load data from Firefly.';
 		}
 	});
+
+	async function addCategory() {
+		if (!$auth || !newCategoryName.trim()) return;
+		creatingCategory = true;
+		try {
+			const cat = await createCategory($auth.fireflyUrl, $auth.token, newCategoryName.trim());
+			categories = [...categories, cat].sort((a, b) => a.name.localeCompare(b.name));
+			categoryId = cat.id;
+			newCategoryName = '';
+			addingCategory = false;
+		} catch {
+			// keep the form open so user can retry
+		} finally {
+			creatingCategory = false;
+		}
+	}
 
 	function addItem() {
 		items = [...items, { id: nextId++, name: '', price: '', category: '', personal: false }];
@@ -75,14 +108,17 @@
 		const receiptItems: ReceiptItem[] = items
 			.filter((i) => i.price)
 			.map((i) => ({
-				name: i.name || store,
+				name: i.name || storeName,
 				price: String(i.price),
 				action: receiptPersonal || i.personal ? 'personal' : 'categorize',
 				...(i.category ? { category_override: i.category } : {})
 			}));
 		try {
 			const id = await submitReceipt($auth.fireflyUrl, $auth.token, {
-				source: 'manual', store, date,
+				source: 'manual',
+				store: storeName,
+				description: description || undefined,
+				date,
 				total: String(total),
 				default_category: categoryId,
 				source_account_id: accountId,
@@ -90,7 +126,8 @@
 				items: receiptItems
 			});
 			successId = id;
-			store = ''; total = ''; items = []; receiptPersonal = false;
+			store = ''; description = ''; total = ''; items = []; receiptPersonal = false;
+			if (expenseAccounts.length) newStore = false;
 		} catch {
 			submitError = 'Failed to submit. Try again.';
 		} finally {
@@ -151,38 +188,83 @@
 			{#if tab === 'out'}
 				<form onsubmit={(e) => { e.preventDefault(); submitOut(); }}>
 					<div class="card header-card">
-						<div class="row">
-							<div class="field">
+
+						<!-- Store field: dropdown or free text -->
+						<div class="field">
+							<div class="label-row">
 								<label for="store">Store</label>
-								<input id="store" type="text" bind:value={store} placeholder="Store" required />
+								<label class="new-toggle">
+									<input type="checkbox" bind:checked={newStore} />
+									New
+								</label>
 							</div>
+							{#if newStore}
+								<input id="store" type="text" bind:value={store} placeholder="Store name" required />
+							{:else}
+								<select id="store" bind:value={storeAccountId} required>
+									{#each expenseAccounts as acc}
+										<option value={acc.id}>{acc.name}</option>
+									{/each}
+								</select>
+							{/if}
+						</div>
+
+						<!-- Description -->
+						<div class="field">
+							<label for="description">Description <span class="optional">(optional)</span></label>
+							<input id="description" type="text" bind:value={description} placeholder="e.g. Birthday party food" />
+						</div>
+
+						<div class="row">
 							<div class="field">
 								<label for="date">Date</label>
 								<input id="date" type="date" bind:value={date} required />
 							</div>
-						</div>
-						<div class="field">
-							<label for="total">Amount (SEK)</label>
-							<input id="total" type="text" inputmode="decimal" bind:value={total} placeholder="0.00" required />
-						</div>
-						<div class="row">
 							<div class="field">
+								<label for="total">Amount (SEK)</label>
+								<input id="total" type="text" inputmode="decimal" bind:value={total} placeholder="0.00" required />
+							</div>
+						</div>
+
+						<!-- Category with inline add -->
+						<div class="field">
+							<div class="label-row">
 								<label for="category">Category</label>
+								<button type="button" class="add-cat-btn" onclick={() => { addingCategory = !addingCategory; newCategoryName = ''; }}>
+									{addingCategory ? '✕' : '+ New'}
+								</button>
+							</div>
+							{#if addingCategory}
+								<div class="new-cat-row">
+									<input
+										type="text"
+										bind:value={newCategoryName}
+										placeholder="Category name"
+										onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), addCategory())}
+										autofocus
+									/>
+									<button type="button" class="btn-save-cat" onclick={addCategory} disabled={creatingCategory || !newCategoryName.trim()}>
+										{creatingCategory ? '…' : 'Add'}
+									</button>
+								</div>
+							{:else}
 								<select id="category" bind:value={categoryId}>
 									{#each categories as cat}
 										<option value={cat.id}>{cat.name}</option>
 									{/each}
 								</select>
-							</div>
-							<div class="field">
-								<label for="account">Account</label>
-								<select id="account" bind:value={accountId}>
-									{#each accounts as acc}
-										<option value={acc.id}>{acc.name}</option>
-									{/each}
-								</select>
-							</div>
+							{/if}
 						</div>
+
+						<div class="field">
+							<label for="account">Account</label>
+							<select id="account" bind:value={accountId}>
+								{#each accounts as acc}
+									<option value={acc.id}>{acc.name}</option>
+								{/each}
+							</select>
+						</div>
+
 						<label class="personal-check">
 							<input type="checkbox" bind:checked={receiptPersonal} />
 							Personal receipt
@@ -373,6 +455,69 @@
 		gap: 0.75rem;
 	}
 
+	/* Label row with action on the right */
+	.label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.new-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		font-size: 0.8rem;
+		color: var(--color-muted);
+		font-weight: 400;
+		text-transform: none;
+		letter-spacing: 0;
+		cursor: pointer;
+	}
+
+	.new-toggle input[type='checkbox'] {
+		width: 0.875rem;
+		height: 0.875rem;
+		cursor: pointer;
+	}
+
+	.optional {
+		font-weight: 400;
+		text-transform: none;
+		letter-spacing: 0;
+		font-size: 0.75rem;
+		color: var(--color-muted);
+	}
+
+	/* Category add */
+	.add-cat-btn {
+		background: none;
+		border: none;
+		color: var(--color-primary);
+		font-size: 0.8rem;
+		font-weight: 600;
+		cursor: pointer;
+		padding: 0;
+	}
+
+	.new-cat-row {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		gap: 0.5rem;
+	}
+
+	.btn-save-cat {
+		padding: 0.75rem 1rem;
+		background: var(--color-primary);
+		color: #fff;
+		border: none;
+		border-radius: 0.5rem;
+		font-weight: 600;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.btn-save-cat:disabled { opacity: 0.5; cursor: not-allowed; }
+
 	/* Items */
 	.items-list {
 		display: flex;
@@ -512,9 +657,6 @@
 		text-align: center;
 	}
 
-	.btn-income {
-		background: #16a34a;
-	}
-
+	.btn-income { background: #16a34a; }
 	.btn-income:hover { background: #15803d; }
 </style>

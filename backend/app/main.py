@@ -1,3 +1,4 @@
+import os
 from datetime import date
 from decimal import Decimal
 from typing import Literal
@@ -8,8 +9,6 @@ from pydantic import BaseModel
 
 from .firefly_client import FireflyClient, FireflyError
 from .models import Deposit, Receipt, ReceiptItem
-
-import os
 
 app = FastAPI(title="Cash Trace")
 
@@ -33,6 +32,10 @@ class ValidateRequest(BaseModel):
     token: str
 
 
+class CreateCategoryRequest(BaseModel):
+    name: str
+
+
 class ReceiptItemSchema(BaseModel):
     name: str
     price: Decimal
@@ -41,16 +44,17 @@ class ReceiptItemSchema(BaseModel):
 
 
 class DepositSchema(BaseModel):
-    source: str       # free-text revenue account name (e.g. "Employer")
+    source: str
     date: date
     amount: Decimal
-    category: str     # Firefly category ID
-    destination_account_id: str  # Firefly asset account ID
+    category: str
+    destination_account_id: str
 
 
 class ReceiptSchema(BaseModel):
     source: Literal["camera", "upload", "manual"]
     store: str
+    description: str | None = None
     date: date
     total: Decimal
     default_category: str
@@ -81,6 +85,17 @@ async def get_categories(
     return await client.get_categories()
 
 
+@app.post("/categories")
+async def create_category(
+    body: CreateCategoryRequest,
+    firefly_url: str,
+    authorization: str = Header(...),
+):
+    token = authorization.removeprefix("Bearer ")
+    client = FireflyClient(firefly_url, token)
+    return await client.create_category(body.name)
+
+
 @app.get("/accounts")
 async def get_accounts(
     firefly_url: str,
@@ -89,6 +104,16 @@ async def get_accounts(
     token = authorization.removeprefix("Bearer ")
     client = FireflyClient(firefly_url, token)
     return await client.get_accounts()
+
+
+@app.get("/expense-accounts")
+async def get_expense_accounts(
+    firefly_url: str,
+    authorization: str = Header(...),
+):
+    token = authorization.removeprefix("Bearer ")
+    client = FireflyClient(firefly_url, token)
+    return await client.get_expense_accounts()
 
 
 @app.post("/receipt")
@@ -103,6 +128,7 @@ async def submit_receipt(
     receipt = Receipt(
         source=body.source,
         store=body.store,
+        description=body.description,
         date=body.date,
         total=body.total,
         default_category=body.default_category,

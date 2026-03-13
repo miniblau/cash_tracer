@@ -20,6 +20,7 @@ export interface ReceiptItem {
 export interface Receipt {
 	source: 'camera' | 'upload' | 'manual';
 	store: string;
+	description?: string;
 	date: string;
 	total: string;
 	default_category: string;
@@ -40,6 +41,24 @@ export async function validateToken(fireflyUrl: string, token: string): Promise<
 	});
 	if (!res.ok) throw new Error('Invalid token');
 	return (await res.json()).user;
+}
+
+export async function getExpenseAccounts(fireflyUrl: string, token: string): Promise<Account[]> {
+	const res = await fetch(`${BACKEND}/expense-accounts?firefly_url=${encodeURIComponent(fireflyUrl)}`, {
+		headers: authHeaders(token)
+	});
+	if (!res.ok) throw new Error('Failed to fetch expense accounts');
+	return res.json();
+}
+
+export async function createCategory(fireflyUrl: string, token: string, name: string): Promise<Category> {
+	const res = await fetch(`${BACKEND}/categories?firefly_url=${encodeURIComponent(fireflyUrl)}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+		body: JSON.stringify({ name })
+	});
+	if (!res.ok) throw new Error('Failed to create category');
+	return res.json();
 }
 
 export async function getCategories(fireflyUrl: string, token: string): Promise<Category[]> {

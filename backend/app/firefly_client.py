@@ -42,11 +42,35 @@ class FireflyClient:
             for c in resp.json()["data"]
         ]
 
+    async def create_category(self, name: str) -> dict:
+        """Creates a new category and returns { id, name }."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{self.base_url}/api/v1/categories",
+                headers={**self.headers, "Content-Type": "application/json"},
+                json={"name": name},
+            )
+        resp.raise_for_status()
+        data = resp.json()["data"]
+        return {"id": data["id"], "name": data["attributes"]["name"]}
+
     async def get_accounts(self) -> list[dict]:
         """Returns [{ id, name }] for all asset accounts."""
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{self.base_url}/api/v1/accounts?type=asset", headers=self.headers
+            )
+        resp.raise_for_status()
+        return [
+            {"id": a["id"], "name": a["attributes"]["name"]}
+            for a in resp.json()["data"]
+        ]
+
+    async def get_expense_accounts(self) -> list[dict]:
+        """Returns [{ id, name }] for all expense accounts (known stores/payees)."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.base_url}/api/v1/accounts?type=expense", headers=self.headers
             )
         resp.raise_for_status()
         return [
@@ -71,7 +95,6 @@ class FireflyClient:
             )
         resp.raise_for_status()
         return resp.json()["data"]["id"]
-
 
     async def push_deposit(self, deposit: Deposit) -> str:
         """Submits an income deposit to Firefly. Returns the transaction ID."""
@@ -106,6 +129,7 @@ def _build_splits(receipt: Receipt) -> list[dict]:
     """
     date_str = receipt.date.isoformat()
     store = receipt.store
+    description = receipt.description or store
     source_account_id = receipt.source_account_id
 
     splits = []
@@ -116,7 +140,7 @@ def _build_splits(receipt: Receipt) -> list[dict]:
     # Remainder → default category
     remainder = receipt.remainder
     if remainder > 0:
-        splits.append(_split(store, store, date_str, remainder, receipt.default_category, source_account_id, tags=tags_for(False)))
+        splits.append(_split(description, store, date_str, remainder, receipt.default_category, source_account_id, tags=tags_for(False)))
 
     # Exception items grouped by (category, is_personal)
     groups: dict[tuple[str, bool], Decimal] = {}
@@ -127,7 +151,7 @@ def _build_splits(receipt: Receipt) -> list[dict]:
         groups[key] = groups.get(key, Decimal("0")) + item.price
 
     for (cat_id, is_personal), amount in groups.items():
-        splits.append(_split(store, store, date_str, amount, cat_id, source_account_id, tags=tags_for(is_personal)))
+        splits.append(_split(description, store, date_str, amount, cat_id, source_account_id, tags=tags_for(is_personal)))
 
     return splits
 
