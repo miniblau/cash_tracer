@@ -79,10 +79,19 @@ export async function getAccounts(fireflyUrl: string, token: string): Promise<Ac
 
 export interface Deposit {
 	source: string;
+	description?: string;
 	date: string;
 	amount: string;
 	category: string;
 	destination_account_id: string;
+}
+
+export async function getRevenueAccounts(fireflyUrl: string, token: string): Promise<Account[]> {
+	const res = await fetch(`${BACKEND}/revenue-accounts?firefly_url=${encodeURIComponent(fireflyUrl)}`, {
+		headers: authHeaders(token)
+	});
+	if (!res.ok) throw new Error('Failed to fetch revenue accounts');
+	return res.json();
 }
 
 export async function submitDeposit(

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/auth';
-	import { getCategories, getAccounts, getExpenseAccounts, createCategory, submitReceipt, submitDeposit } from '$lib/api';
+	import { getCategories, getAccounts, getExpenseAccounts, getRevenueAccounts, createCategory, submitReceipt, submitDeposit } from '$lib/api';
 	import type { Category, Account, ReceiptItem } from '$lib/api';
 
 	type Tab = 'out' | 'in';
@@ -19,6 +19,7 @@
 	let categories = $state<Category[]>([]);
 	let accounts = $state<Account[]>([]);
 	let expenseAccounts = $state<Account[]>([]);
+	let revenueAccounts = $state<Account[]>([]);
 	let loadError = $state('');
 
 	// --- Out (receipt) state ---
@@ -35,9 +36,12 @@
 	let items = $state<Item[]>([]);
 
 	// --- In (deposit) state ---
-	let depositSource = $state('');
+	let newSource = $state(false);       // toggle: pick existing vs free-text
+	let depositSourceText = $state('');  // free-text (newSource=true)
+	let depositSourceId = $state('');    // existing revenue account id (newSource=false)
 	let depositDate = $state(new Date().toISOString().slice(0, 10));
 	let depositAmount = $state('');
+	let depositDescription = $state('');
 	let depositCategoryName = $state('');
 	let depositAccountId = $state('');
 
@@ -49,6 +53,11 @@
 	const itemsTotal = $derived(items.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0));
 	const remainder = $derived((parseFloat(total) || 0) - itemsTotal);
 
+	// The source name to send — either free text or the selected revenue account's name
+	const sourceName = $derived(
+		newSource ? depositSourceText : (revenueAccounts.find(a => a.id === depositSourceId)?.name ?? '')
+	);
+
 	// The store name to send — either free text or the selected account's name
 	const storeName = $derived(
 		newStore ? store : (expenseAccounts.find(a => a.id === storeAccountId)?.name ?? '')
@@ -59,15 +68,18 @@
 	onMount(async () => {
 		if (!$auth) return;
 		try {
-			[categories, accounts, expenseAccounts] = await Promise.all([
+			[categories, accounts, expenseAccounts, revenueAccounts] = await Promise.all([
 				getCategories($auth.fireflyUrl, $auth.token),
 				getAccounts($auth.fireflyUrl, $auth.token),
 				getExpenseAccounts($auth.fireflyUrl, $auth.token),
+				getRevenueAccounts($auth.fireflyUrl, $auth.token),
 			]);
 			if (categories.length) { categoryName = categories[0].name; depositCategoryName = categories[0].name; }
 			if (accounts.length) { accountId = accounts[0].id; depositAccountId = accounts[0].id; }
 			if (expenseAccounts.length) storeAccountId = expenseAccounts[0].id;
 			else newStore = true; // no known stores yet, default to free text
+			if (revenueAccounts.length) depositSourceId = revenueAccounts[0].id;
+			else newSource = true; // no known sources yet, default to free text
 		} catch {
 			loadError = 'Failed to load data from Firefly.';
 		}
@@ -130,14 +142,16 @@
 		try {
 			const resolvedCategoryId = await resolveCategoryId(depositCategoryName);
 			const id = await submitDeposit($auth.fireflyUrl, $auth.token, {
-				source: depositSource,
+				source: sourceName,
+				description: depositDescription || undefined,
 				date: depositDate,
 				amount: String(depositAmount),
 				category: resolvedCategoryId,
 				destination_account_id: depositAccountId,
 			});
 			successId = id;
-			depositSource = ''; depositAmount = '';
+			depositSourceText = ''; depositDescription = ''; depositAmount = '';
+			if (revenueAccounts.length) newSource = false;
 		} catch {
 			submitError = 'Failed to submit. Try again.';
 		} finally {
@@ -301,41 +315,64 @@
 			{:else}
 				<form onsubmit={(e) => { e.preventDefault(); submitIn(); }}>
 					<div class="card header-card">
-						<div class="row">
-							<div class="field">
+
+						<!-- Source field: dropdown or free text -->
+						<div class="field">
+							<div class="label-row">
 								<label for="dep-source">Source</label>
-								<input id="dep-source" type="text" bind:value={depositSource} placeholder="Employer" required />
+								<label class="new-toggle">
+									<input type="checkbox" bind:checked={newSource} />
+									New
+								</label>
 							</div>
+							{#if newSource}
+								<input id="dep-source" type="text" bind:value={depositSourceText} placeholder="Source name" required />
+							{:else}
+								<select id="dep-source" bind:value={depositSourceId} required>
+									{#each revenueAccounts as acc}
+										<option value={acc.id}>{acc.name}</option>
+									{/each}
+								</select>
+							{/if}
+						</div>
+
+						<!-- Description -->
+						<div class="field">
+							<label for="dep-description">Description <span class="optional">(optional)</span></label>
+							<input id="dep-description" type="text" bind:value={depositDescription} placeholder="e.g. Old bike" />
+						</div>
+
+						<div class="row">
 							<div class="field">
 								<label for="dep-date">Date</label>
 								<input id="dep-date" type="date" bind:value={depositDate} required />
 							</div>
+							<div class="field">
+								<label for="dep-amount">Amount (SEK)</label>
+								<input id="dep-amount" type="text" inputmode="decimal" bind:value={depositAmount} placeholder="0.00" required />
+							</div>
 						</div>
+
 						<div class="field">
-							<label for="dep-amount">Amount (SEK)</label>
-							<input id="dep-amount" type="text" inputmode="decimal" bind:value={depositAmount} placeholder="0.00" required />
+							<label for="dep-category">Category</label>
+							<input
+								id="dep-category"
+								type="text"
+								list="categories-list"
+								bind:value={depositCategoryName}
+								placeholder="Type or pick a category"
+								required
+								autocomplete="off"
+							/>
 						</div>
-						<div class="row">
-							<div class="field">
-								<label for="dep-category">Category</label>
-								<input
-									id="dep-category"
-									type="text"
-									list="categories-list"
-									bind:value={depositCategoryName}
-									placeholder="Type or pick a category"
-									required
-									autocomplete="off"
-								/>
-							</div>
-							<div class="field">
-								<label for="dep-account">Account</label>
-								<select id="dep-account" bind:value={depositAccountId}>
-									{#each accounts as acc}
-										<option value={acc.id}>{acc.name}</option>
-									{/each}
-								</select>
-							</div>
+
+						<div class="field">
+							<label for="dep-account">Account</label>
+							<select id="dep-account" bind:value={depositAccountId}>
+								{#each accounts as acc}
+									<option value={acc.id}>{acc.name}</option>
+								{/each}
+							</select>
 						</div>
 					</div>
 

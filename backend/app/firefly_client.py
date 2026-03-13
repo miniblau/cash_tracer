@@ -66,6 +66,18 @@ class FireflyClient:
             for a in resp.json()["data"]
         ]
 
+    async def get_revenue_accounts(self) -> list[dict]:
+        """Returns [{ id, name }] for all revenue accounts (known income sources)."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.base_url}/api/v1/accounts?type=revenue", headers=self.headers
+            )
+        resp.raise_for_status()
+        return [
+            {"id": a["id"], "name": a["attributes"]["name"]}
+            for a in resp.json()["data"]
+        ]
+
     async def get_expense_accounts(self) -> list[dict]:
         """Returns [{ id, name }] for all expense accounts (known stores/payees)."""
         async with httpx.AsyncClient() as client:
@@ -102,7 +114,7 @@ class FireflyClient:
             "transactions": [{
                 "type": "deposit",
                 "date": deposit.date.isoformat(),
-                "description": deposit.source,
+                "description": deposit.description or deposit.source,
                 "amount": str(deposit.amount),
                 "currency_code": "SEK",
                 "category_id": deposit.category,

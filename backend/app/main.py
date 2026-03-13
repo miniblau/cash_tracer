@@ -45,6 +45,7 @@ class ReceiptItemSchema(BaseModel):
 
 class DepositSchema(BaseModel):
     source: str
+    description: str | None = None
     date: date
     amount: Decimal
     category: str
@@ -106,6 +107,16 @@ async def get_accounts(
     return await client.get_accounts()
 
 
+@app.get("/revenue-accounts")
+async def get_revenue_accounts(
+    firefly_url: str,
+    authorization: str = Header(...),
+):
+    token = authorization.removeprefix("Bearer ")
+    client = FireflyClient(firefly_url, token)
+    return await client.get_revenue_accounts()
+
+
 @app.get("/expense-accounts")
 async def get_expense_accounts(
     firefly_url: str,
@@ -159,6 +170,7 @@ async def submit_deposit(
     client = FireflyClient(firefly_url, token)
     deposit = Deposit(
         source=body.source,
+        description=body.description,
         date=body.date,
         amount=body.amount,
         category=body.category,
