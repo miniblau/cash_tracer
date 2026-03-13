@@ -28,22 +28,17 @@
 	let description = $state('');
 	let date = $state(new Date().toISOString().slice(0, 10));
 	let total = $state('');
-	let categoryId = $state('');
+	let categoryName = $state('');      // typed or selected category name; auto-created if new
 	let accountId = $state('');
 	let receiptPersonal = $state(false);
 	let nextId = 1;
 	let items = $state<Item[]>([]);
 
-	// --- Category creation ---
-	let addingCategory = $state(false);
-	let newCategoryName = $state('');
-	let creatingCategory = $state(false);
-
 	// --- In (deposit) state ---
 	let depositSource = $state('');
 	let depositDate = $state(new Date().toISOString().slice(0, 10));
 	let depositAmount = $state('');
-	let depositCategoryId = $state('');
+	let depositCategoryName = $state('');
 	let depositAccountId = $state('');
 
 	// --- Shared submission state ---
@@ -69,7 +64,7 @@
 				getAccounts($auth.fireflyUrl, $auth.token),
 				getExpenseAccounts($auth.fireflyUrl, $auth.token),
 			]);
-			if (categories.length) { categoryId = categories[0].id; depositCategoryId = categories[0].id; }
+			if (categories.length) { categoryName = categories[0].name; depositCategoryName = categories[0].name; }
 			if (accounts.length) { accountId = accounts[0].id; depositAccountId = accounts[0].id; }
 			if (expenseAccounts.length) storeAccountId = expenseAccounts[0].id;
 			else newStore = true; // no known stores yet, default to free text
@@ -78,20 +73,13 @@
 		}
 	});
 
-	async function addCategory() {
-		if (!$auth || !newCategoryName.trim()) return;
-		creatingCategory = true;
-		try {
-			const cat = await createCategory($auth.fireflyUrl, $auth.token, newCategoryName.trim());
-			categories = [...categories, cat].sort((a, b) => a.name.localeCompare(b.name));
-			categoryId = cat.id;
-			newCategoryName = '';
-			addingCategory = false;
-		} catch {
-			// keep the form open so user can retry
-		} finally {
-			creatingCategory = false;
-		}
+	/** Resolves a category name to an ID, creating it in Firefly if it doesn't exist. */
+	async function resolveCategoryId(name: string): Promise<string> {
+		const existing = categories.find(c => c.name.toLowerCase() === name.trim().toLowerCase());
+		if (existing) return existing.id;
+		const created = await createCategory($auth!.fireflyUrl, $auth!.token, name.trim());
+		categories = [...categories, created].sort((a, b) => a.name.localeCompare(b.name));
+		return created.id;
 	}
 
 	function addItem() {
@@ -114,13 +102,14 @@
 				...(i.category ? { category_override: i.category } : {})
 			}));
 		try {
+			const resolvedCategoryId = await resolveCategoryId(categoryName);
 			const id = await submitReceipt($auth.fireflyUrl, $auth.token, {
 				source: 'manual',
 				store: storeName,
 				description: description || undefined,
 				date,
 				total: String(total),
-				default_category: categoryId,
+				default_category: resolvedCategoryId,
 				source_account_id: accountId,
 				personal: receiptPersonal,
 				items: receiptItems
@@ -139,11 +128,12 @@
 		if (!$auth) return;
 		submitting = true; clearStatus();
 		try {
+			const resolvedCategoryId = await resolveCategoryId(depositCategoryName);
 			const id = await submitDeposit($auth.fireflyUrl, $auth.token, {
 				source: depositSource,
 				date: depositDate,
 				amount: String(depositAmount),
-				category: depositCategoryId,
+				category: resolvedCategoryId,
 				destination_account_id: depositAccountId,
 			});
 			successId = id;
@@ -226,34 +216,22 @@
 							</div>
 						</div>
 
-						<!-- Category with inline add -->
 						<div class="field">
-							<div class="label-row">
-								<label for="category">Category</label>
-								<button type="button" class="add-cat-btn" onclick={() => { addingCategory = !addingCategory; newCategoryName = ''; }}>
-									{addingCategory ? '✕' : '+ New'}
-								</button>
-							</div>
-							{#if addingCategory}
-								<div class="new-cat-row">
-									<input
-										type="text"
-										bind:value={newCategoryName}
-										placeholder="Category name"
-										onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), addCategory())}
-										autofocus
-									/>
-									<button type="button" class="btn-save-cat" onclick={addCategory} disabled={creatingCategory || !newCategoryName.trim()}>
-										{creatingCategory ? '…' : 'Add'}
-									</button>
-								</div>
-							{:else}
-								<select id="category" bind:value={categoryId}>
-									{#each categories as cat}
-										<option value={cat.id}>{cat.name}</option>
-									{/each}
-								</select>
-							{/if}
+							<label for="category">Category</label>
+							<input
+								id="category"
+								type="text"
+								list="categories-list"
+								bind:value={categoryName}
+								placeholder="Type or pick a category"
+								required
+								autocomplete="off"
+							/>
+							<datalist id="categories-list">
+								{#each categories as cat}
+									<option value={cat.name} />
+								{/each}
+							</datalist>
 						</div>
 
 						<div class="field">
@@ -282,7 +260,7 @@
 									</div>
 									<div class="item-bottom">
 										<select bind:value={item.category} class="category-select">
-											<option value="">{categories.find(c => c.id === categoryId)?.name ?? '—'}</option>
+											<option value="">{categoryName || '—'}</option>
 											{#each categories as cat}
 												<option value={cat.id}>{cat.name}</option>
 											{/each}
@@ -340,11 +318,15 @@
 						<div class="row">
 							<div class="field">
 								<label for="dep-category">Category</label>
-								<select id="dep-category" bind:value={depositCategoryId}>
-									{#each categories as cat}
-										<option value={cat.id}>{cat.name}</option>
-									{/each}
-								</select>
+								<input
+									id="dep-category"
+									type="text"
+									list="categories-list"
+									bind:value={depositCategoryName}
+									placeholder="Type or pick a category"
+									required
+									autocomplete="off"
+								/>
 							</div>
 							<div class="field">
 								<label for="dep-account">Account</label>
@@ -488,35 +470,6 @@
 		color: var(--color-muted);
 	}
 
-	/* Category add */
-	.add-cat-btn {
-		background: none;
-		border: none;
-		color: var(--color-primary);
-		font-size: 0.8rem;
-		font-weight: 600;
-		cursor: pointer;
-		padding: 0;
-	}
-
-	.new-cat-row {
-		display: grid;
-		grid-template-columns: 1fr auto;
-		gap: 0.5rem;
-	}
-
-	.btn-save-cat {
-		padding: 0.75rem 1rem;
-		background: var(--color-primary);
-		color: #fff;
-		border: none;
-		border-radius: 0.5rem;
-		font-weight: 600;
-		cursor: pointer;
-		white-space: nowrap;
-	}
-
-	.btn-save-cat:disabled { opacity: 0.5; cursor: not-allowed; }
 
 	/* Items */
 	.items-list {
