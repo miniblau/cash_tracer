@@ -12,7 +12,7 @@ fi
 dc -f docker-compose.yml up -d
 
 # Ensure wget is available inside the Firefly container
-docker exec firefly_iii_core which wget &>/dev/null || docker exec firefly_iii_core apt-get install -y wget -q
+docker exec firefly_iii_core which wget &>/dev/null || docker exec -u root firefly_iii_core apt-get install -y wget -q
 
 # Wait for Firefly to accept HTTP connections
 echo "Waiting for Firefly III..."
