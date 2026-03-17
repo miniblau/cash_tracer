@@ -15,6 +15,9 @@ CSV format (comma-separated):
 Usage:
   python3 import_csv.py --url https://firefly.yourdomain.com --token YOUR_PAT transactions.csv
 
+  # Specify which asset account to use (defaults to first found):
+  python3 import_csv.py --url ... --token ... --account "Savings" transactions.csv
+
   Or via env vars:
   FIREFLY_URL=https://... FIREFLY_TOKEN=... python3 import_csv.py transactions.csv
 """
@@ -39,6 +42,13 @@ def get_categories(session, base_url):
     return {c["attributes"]["name"].lower(): c["id"] for c in resp.json()["data"]}
 
 
+def get_asset_accounts(session, base_url):
+    """Returns a list of {id, name} for all asset accounts."""
+    resp = session.get(f"{base_url}/api/v1/accounts?type=asset")
+    resp.raise_for_status()
+    return [{"id": a["id"], "name": a["attributes"]["name"]} for a in resp.json()["data"]]
+
+
 def ensure_category(session, base_url, name, cache):
     """Returns category ID for name, creating it in Firefly if needed."""
     key = name.strip().lower()
@@ -52,7 +62,7 @@ def ensure_category(session, base_url, name, cache):
     return cat_id
 
 
-def build_transaction(row, category_id):
+def build_transaction(row, category_id, account_id):
     amount = Decimal(row["amount"])
     date = row["date"].strip()
     source = row["source"].strip()
@@ -68,6 +78,7 @@ def build_transaction(row, category_id):
                 "amount": str(abs(amount)),
                 "currency_code": "SEK",
                 "category_id": category_id,
+                "source_id": account_id,
                 "destination_name": source,
                 "tags": tags,
             }]
@@ -81,6 +92,7 @@ def build_transaction(row, category_id):
                 "amount": str(amount),
                 "currency_code": "SEK",
                 "category_id": category_id,
+                "destination_id": account_id,
                 "source_name": source,
                 "tags": tags,
             }]
@@ -92,6 +104,7 @@ def main():
     parser.add_argument("csv_file", help="Path to the CSV file")
     parser.add_argument("--url", default=os.getenv("FIREFLY_URL"), help="Firefly base URL")
     parser.add_argument("--token", default=os.getenv("FIREFLY_TOKEN"), help="Personal Access Token")
+    parser.add_argument("--account", default=os.getenv("FIREFLY_ACCOUNT"), help="Asset account name (defaults to first found)")
     parser.add_argument("--dry-run", action="store_true", help="Parse only, don't submit")
     args = parser.parse_args()
 
@@ -106,6 +119,25 @@ def main():
         "Accept": "application/json",
     })
 
+    print("Fetching asset accounts...")
+    accounts = get_asset_accounts(session, base_url)
+    if not accounts:
+        print("Error: no asset accounts found in Firefly.")
+        sys.exit(1)
+
+    if args.account:
+        match = next((a for a in accounts if a["name"].lower() == args.account.lower()), None)
+        if not match:
+            print(f"Error: account '{args.account}' not found. Available accounts:")
+            for a in accounts:
+                print(f"  - {a['name']}")
+            sys.exit(1)
+        account = match
+    else:
+        account = accounts[0]
+
+    print(f"  Using account: {account['name']} (id={account['id']})")
+
     print("Fetching existing categories...")
     category_cache = get_categories(session, base_url)
     print(f"  Found {len(category_cache)} categories.")
@@ -113,10 +145,10 @@ def main():
     with open(args.csv_file, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         # Strip whitespace from field names (handles trailing commas/spaces)
-        reader.fieldnames = [name.strip() for name in reader.fieldnames]
-        rows = [row for row in reader if any(v.strip() for v in row.values())]
+        reader.fieldnames = [name.strip() for name in reader.fieldnames if name and name.strip()]
+        rows = [row for row in reader if any(v.strip() for v in row.values() if v)]
 
-    print(f"Importing {len(rows)} transactions{'(dry run)' if args.dry_run else ''}...\n")
+    print(f"Importing {len(rows)} transactions{' (dry run)' if args.dry_run else ''}...\n")
 
     ok = 0
     errors = []
@@ -134,7 +166,7 @@ def main():
 
         try:
             category_id = ensure_category(session, base_url, category_name, category_cache)
-            payload = build_transaction(row, category_id)
+            payload = build_transaction(row, category_id, account["id"])
 
             if args.dry_run:
                 direction = "OUT" if Decimal(amount_raw) < 0 else "IN"
