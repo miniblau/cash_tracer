@@ -160,20 +160,10 @@
 		{:else if !accounts.length}
 			<p class="error">No asset accounts found in Firefly. Add at least one account to get started.</p>
 		{:else}
-			<!-- Shared datalists -->
+			<!-- Shared datalist -->
 			<datalist id="categories-list">
 				{#each categories as cat}
 					<option value={cat.name} />
-				{/each}
-			</datalist>
-			<datalist id="expense-accounts-list">
-				{#each expenseAccounts as acc}
-					<option value={acc.name} />
-				{/each}
-			</datalist>
-			<datalist id="revenue-accounts-list">
-				{#each revenueAccounts as acc}
-					<option value={acc.name} />
 				{/each}
 			</datalist>
 
@@ -187,6 +177,11 @@
 			</div>
 
 			{#if tab === 'out'}
+				<datalist id="expense-accounts-list">
+					{#each expenseAccounts as acc}
+						<option value={acc.name} />
+					{/each}
+				</datalist>
 				<form onsubmit={(e) => { e.preventDefault(); submitOut(); }}>
 					<div class="card header-card">
 						<div class="field">
@@ -296,6 +291,11 @@
 				</form>
 
 			{:else}
+				<datalist id="revenue-accounts-list">
+					{#each revenueAccounts as acc}
+						<option value={acc.name} />
+					{/each}
+				</datalist>
 				<form onsubmit={(e) => { e.preventDefault(); submitIn(); }}>
 					<div class="card header-card">
 						<div class="field">

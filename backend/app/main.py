@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -64,6 +64,15 @@ class ReceiptSchema(BaseModel):
     items: list[ReceiptItemSchema] = []
 
 
+# --- Dependencies ---
+
+def get_client(
+    firefly_url: str,
+    authorization: str = Header(...),
+) -> FireflyClient:
+    return FireflyClient(firefly_url, authorization.removeprefix("Bearer "))
+
+
 # --- Endpoints ---
 
 @app.post("/auth/validate")
@@ -77,65 +86,38 @@ async def validate_auth(body: ValidateRequest):
 
 
 @app.get("/categories")
-async def get_categories(
-    firefly_url: str,
-    authorization: str = Header(...),
-):
-    token = authorization.removeprefix("Bearer ")
-    client = FireflyClient(firefly_url, token)
+async def get_categories(client: FireflyClient = Depends(get_client)):
     return await client.get_categories()
 
 
 @app.post("/categories")
 async def create_category(
     body: CreateCategoryRequest,
-    firefly_url: str,
-    authorization: str = Header(...),
+    client: FireflyClient = Depends(get_client),
 ):
-    token = authorization.removeprefix("Bearer ")
-    client = FireflyClient(firefly_url, token)
     return await client.create_category(body.name)
 
 
 @app.get("/accounts")
-async def get_accounts(
-    firefly_url: str,
-    authorization: str = Header(...),
-):
-    token = authorization.removeprefix("Bearer ")
-    client = FireflyClient(firefly_url, token)
+async def get_accounts(client: FireflyClient = Depends(get_client)):
     return await client.get_accounts()
 
 
 @app.get("/revenue-accounts")
-async def get_revenue_accounts(
-    firefly_url: str,
-    authorization: str = Header(...),
-):
-    token = authorization.removeprefix("Bearer ")
-    client = FireflyClient(firefly_url, token)
+async def get_revenue_accounts(client: FireflyClient = Depends(get_client)):
     return await client.get_revenue_accounts()
 
 
 @app.get("/expense-accounts")
-async def get_expense_accounts(
-    firefly_url: str,
-    authorization: str = Header(...),
-):
-    token = authorization.removeprefix("Bearer ")
-    client = FireflyClient(firefly_url, token)
+async def get_expense_accounts(client: FireflyClient = Depends(get_client)):
     return await client.get_expense_accounts()
 
 
 @app.post("/receipt")
 async def submit_receipt(
     body: ReceiptSchema,
-    firefly_url: str,
-    authorization: str = Header(...),
+    client: FireflyClient = Depends(get_client),
 ):
-    token = authorization.removeprefix("Bearer ")
-    client = FireflyClient(firefly_url, token)
-
     receipt = Receipt(
         source=body.source,
         store=body.store,
@@ -163,11 +145,8 @@ async def submit_receipt(
 @app.post("/deposit")
 async def submit_deposit(
     body: DepositSchema,
-    firefly_url: str,
-    authorization: str = Header(...),
+    client: FireflyClient = Depends(get_client),
 ):
-    token = authorization.removeprefix("Bearer ")
-    client = FireflyClient(firefly_url, token)
     deposit = Deposit(
         source=body.source,
         description=body.description,

@@ -16,13 +16,27 @@ class FireflyClient:
             raise FireflyError("Token is required")
         self.headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
+    async def _get(self, path: str) -> httpx.Response:
+        async with httpx.AsyncClient() as client:
+            return await client.get(f"{self.base_url}{path}", headers=self.headers)
+
+    async def _post(self, path: str, json: dict) -> httpx.Response:
+        async with httpx.AsyncClient() as client:
+            return await client.post(
+                f"{self.base_url}{path}",
+                headers={**self.headers, "Content-Type": "application/json"},
+                json=json,
+            )
+
+    async def _get_accounts(self, account_type: str) -> list[dict]:
+        resp = await self._get(f"/api/v1/accounts?type={account_type}")
+        resp.raise_for_status()
+        return [{"id": a["id"], "name": a["attributes"]["name"]} for a in resp.json()["data"]]
+
     async def validate_token(self) -> str:
         """Returns the username if the token is valid, raises FireflyError otherwise."""
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    f"{self.base_url}/api/v1/about/user", headers=self.headers
-                )
+            resp = await self._get("/api/v1/about/user")
         except httpx.ConnectError:
             raise FireflyError("Could not reach Firefly at that URL")
         if resp.status_code == 401:
@@ -32,63 +46,28 @@ class FireflyClient:
 
     async def get_categories(self) -> list[dict]:
         """Returns [{ id, name }] for all categories."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{self.base_url}/api/v1/categories", headers=self.headers
-            )
+        resp = await self._get("/api/v1/categories")
         resp.raise_for_status()
-        return [
-            {"id": c["id"], "name": c["attributes"]["name"]}
-            for c in resp.json()["data"]
-        ]
+        return [{"id": c["id"], "name": c["attributes"]["name"]} for c in resp.json()["data"]]
 
     async def create_category(self, name: str) -> dict:
         """Creates a new category and returns { id, name }."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self.base_url}/api/v1/categories",
-                headers={**self.headers, "Content-Type": "application/json"},
-                json={"name": name},
-            )
+        resp = await self._post("/api/v1/categories", {"name": name})
         resp.raise_for_status()
         data = resp.json()["data"]
         return {"id": data["id"], "name": data["attributes"]["name"]}
 
     async def get_accounts(self) -> list[dict]:
         """Returns [{ id, name }] for all asset accounts."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{self.base_url}/api/v1/accounts?type=asset", headers=self.headers
-            )
-        resp.raise_for_status()
-        return [
-            {"id": a["id"], "name": a["attributes"]["name"]}
-            for a in resp.json()["data"]
-        ]
+        return await self._get_accounts("asset")
 
     async def get_revenue_accounts(self) -> list[dict]:
         """Returns [{ id, name }] for all revenue accounts (known income sources)."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{self.base_url}/api/v1/accounts?type=revenue", headers=self.headers
-            )
-        resp.raise_for_status()
-        return [
-            {"id": a["id"], "name": a["attributes"]["name"]}
-            for a in resp.json()["data"]
-        ]
+        return await self._get_accounts("revenue")
 
     async def get_expense_accounts(self) -> list[dict]:
         """Returns [{ id, name }] for all expense accounts (known stores/payees)."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{self.base_url}/api/v1/accounts?type=expense", headers=self.headers
-            )
-        resp.raise_for_status()
-        return [
-            {"id": a["id"], "name": a["attributes"]["name"]}
-            for a in resp.json()["data"]
-        ]
+        return await self._get_accounts("expense")
 
     async def push_transaction(self, receipt: Receipt) -> str:
         """Submits a receipt to Firefly. Returns the transaction ID."""
@@ -99,12 +78,7 @@ class FireflyClient:
         }
         if len(splits) > 1:
             payload["group_title"] = receipt.store
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self.base_url}/api/v1/transactions",
-                headers={**self.headers, "Content-Type": "application/json"},
-                json=payload,
-            )
+        resp = await self._post("/api/v1/transactions", payload)
         resp.raise_for_status()
         return resp.json()["data"]["id"]
 
@@ -123,12 +97,7 @@ class FireflyClient:
                 "tags": ["personal"],
             }]
         }
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self.base_url}/api/v1/transactions",
-                headers={**self.headers, "Content-Type": "application/json"},
-                json=payload,
-            )
+        resp = await self._post("/api/v1/transactions", payload)
         resp.raise_for_status()
         return resp.json()["data"]["id"]
 

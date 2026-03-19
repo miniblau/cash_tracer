@@ -165,19 +165,19 @@ def main():
             continue
 
         try:
+            direction = "OUT" if Decimal(amount_raw) < 0 else "IN"
             category_id = ensure_category(session, base_url, category_name, category_cache)
             payload = build_transaction(row, category_id, account["id"])
 
             if args.dry_run:
-                direction = "OUT" if Decimal(amount_raw) < 0 else "IN"
                 print(f"  [{i}/{len(rows)}] {direction} {amount_raw} SEK — {source} ({category_name})")
                 ok += 1
                 continue
 
             resp = session.post(f"{base_url}/api/v1/transactions", json=payload)
-            resp.raise_for_status()
+            if not resp.ok:
+                raise Exception(f"{resp.status_code}: {resp.json()}")
             tx_id = resp.json()["data"]["id"]
-            direction = "OUT" if Decimal(amount_raw) < 0 else "IN"
             print(f"  [{i}/{len(rows)}] OK #{tx_id} {direction} {amount_raw} SEK — {source} ({category_name})")
             ok += 1
 
