@@ -23,22 +23,18 @@
 	let loadError = $state('');
 
 	// --- Out (receipt) state ---
-	let newStore = $state(false);       // toggle: pick existing vs free-text
-	let store = $state('');             // free-text (newStore=true) or existing account name
-	let storeAccountId = $state('');    // existing expense account id (newStore=false)
+	let store = $state('');        // typed or picked from expense accounts datalist
 	let description = $state('');
 	let date = $state(new Date().toISOString().slice(0, 10));
 	let total = $state('');
-	let categoryName = $state('');      // typed or selected category name; auto-created if new
+	let categoryName = $state(''); // typed or picked; auto-created if new
 	let accountId = $state('');
 	let receiptPersonal = $state(false);
 	let nextId = 1;
 	let items = $state<Item[]>([]);
 
 	// --- In (deposit) state ---
-	let newSource = $state(false);       // toggle: pick existing vs free-text
-	let depositSourceText = $state('');  // free-text (newSource=true)
-	let depositSourceId = $state('');    // existing revenue account id (newSource=false)
+	let depositSource = $state('');      // typed or picked from revenue accounts datalist
 	let depositDate = $state(new Date().toISOString().slice(0, 10));
 	let depositAmount = $state('');
 	let depositDescription = $state('');
@@ -53,16 +49,6 @@
 	const itemsTotal = $derived(items.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0));
 	const remainder = $derived((parseFloat(total) || 0) - itemsTotal);
 
-	// The source name to send — either free text or the selected revenue account's name
-	const sourceName = $derived(
-		newSource ? depositSourceText : (revenueAccounts.find(a => a.id === depositSourceId)?.name ?? '')
-	);
-
-	// The store name to send — either free text or the selected account's name
-	const storeName = $derived(
-		newStore ? store : (expenseAccounts.find(a => a.id === storeAccountId)?.name ?? '')
-	);
-
 	function clearStatus() { submitError = ''; successId = ''; }
 
 	onMount(async () => {
@@ -76,10 +62,6 @@
 			]);
 			if (categories.length) { categoryName = categories[0].name; depositCategoryName = categories[0].name; }
 			if (accounts.length) { accountId = accounts[0].id; depositAccountId = accounts[0].id; }
-			if (expenseAccounts.length) storeAccountId = expenseAccounts[0].id;
-			else newStore = true; // no known stores yet, default to free text
-			if (revenueAccounts.length) depositSourceId = revenueAccounts[0].id;
-			else newSource = true; // no known sources yet, default to free text
 		} catch {
 			loadError = 'Failed to load data from Firefly.';
 		}
@@ -108,7 +90,7 @@
 		const receiptItems: ReceiptItem[] = items
 			.filter((i) => i.price)
 			.map((i) => ({
-				name: i.name || storeName,
+				name: i.name || store.trim(),
 				price: String(i.price),
 				action: receiptPersonal || i.personal ? 'personal' : 'categorize',
 				...(i.category ? { category_override: i.category } : {})
@@ -117,7 +99,7 @@
 			const resolvedCategoryId = await resolveCategoryId(categoryName);
 			const id = await submitReceipt($auth.fireflyUrl, $auth.token, {
 				source: 'manual',
-				store: storeName,
+				store: store.trim(),
 				description: description || undefined,
 				date,
 				total: String(total),
@@ -128,7 +110,6 @@
 			});
 			successId = id;
 			store = ''; description = ''; total = ''; items = []; receiptPersonal = false;
-			if (expenseAccounts.length) newStore = false;
 		} catch {
 			submitError = 'Failed to submit. Try again.';
 		} finally {
@@ -142,7 +123,7 @@
 		try {
 			const resolvedCategoryId = await resolveCategoryId(depositCategoryName);
 			const id = await submitDeposit($auth.fireflyUrl, $auth.token, {
-				source: sourceName,
+				source: depositSource.trim(),
 				description: depositDescription || undefined,
 				date: depositDate,
 				amount: String(depositAmount),
@@ -150,8 +131,7 @@
 				destination_account_id: depositAccountId,
 			});
 			successId = id;
-			depositSourceText = ''; depositDescription = ''; depositAmount = '';
-			if (revenueAccounts.length) newSource = false;
+			depositSource = ''; depositDescription = ''; depositAmount = '';
 		} catch {
 			submitError = 'Failed to submit. Try again.';
 		} finally {
@@ -180,6 +160,23 @@
 		{:else if !accounts.length}
 			<p class="error">No asset accounts found in Firefly. Add at least one account to get started.</p>
 		{:else}
+			<!-- Shared datalists -->
+			<datalist id="categories-list">
+				{#each categories as cat}
+					<option value={cat.name} />
+				{/each}
+			</datalist>
+			<datalist id="expense-accounts-list">
+				{#each expenseAccounts as acc}
+					<option value={acc.name} />
+				{/each}
+			</datalist>
+			<datalist id="revenue-accounts-list">
+				{#each revenueAccounts as acc}
+					<option value={acc.name} />
+				{/each}
+			</datalist>
+
 			<div class="tabs">
 				<button class="tab" class:active={tab === 'out'} onclick={() => { tab = 'out'; clearStatus(); }}>
 					Out
@@ -192,28 +189,19 @@
 			{#if tab === 'out'}
 				<form onsubmit={(e) => { e.preventDefault(); submitOut(); }}>
 					<div class="card header-card">
-
-						<!-- Store field: dropdown or free text -->
 						<div class="field">
-							<div class="label-row">
-								<label for="store">Store</label>
-								<label class="new-toggle">
-									<input type="checkbox" bind:checked={newStore} />
-									New
-								</label>
-							</div>
-							{#if newStore}
-								<input id="store" type="text" bind:value={store} placeholder="Store name" required />
-							{:else}
-								<select id="store" bind:value={storeAccountId} required>
-									{#each expenseAccounts as acc}
-										<option value={acc.id}>{acc.name}</option>
-									{/each}
-								</select>
-							{/if}
+							<label for="store">Store</label>
+							<input
+								id="store"
+								type="text"
+								list="expense-accounts-list"
+								bind:value={store}
+								placeholder="Type or pick a store"
+								required
+								autocomplete="off"
+							/>
 						</div>
 
-						<!-- Description -->
 						<div class="field">
 							<label for="description">Description <span class="optional">(optional)</span></label>
 							<input id="description" type="text" bind:value={description} placeholder="e.g. Birthday party food" />
@@ -241,11 +229,6 @@
 								required
 								autocomplete="off"
 							/>
-							<datalist id="categories-list">
-								{#each categories as cat}
-									<option value={cat.name} />
-								{/each}
-							</datalist>
 						</div>
 
 						<div class="field">
@@ -315,28 +298,19 @@
 			{:else}
 				<form onsubmit={(e) => { e.preventDefault(); submitIn(); }}>
 					<div class="card header-card">
-
-						<!-- Source field: dropdown or free text -->
 						<div class="field">
-							<div class="label-row">
-								<label for="dep-source">Source</label>
-								<label class="new-toggle">
-									<input type="checkbox" bind:checked={newSource} />
-									New
-								</label>
-							</div>
-							{#if newSource}
-								<input id="dep-source" type="text" bind:value={depositSourceText} placeholder="Source name" required />
-							{:else}
-								<select id="dep-source" bind:value={depositSourceId} required>
-									{#each revenueAccounts as acc}
-										<option value={acc.id}>{acc.name}</option>
-									{/each}
-								</select>
-							{/if}
+							<label for="dep-source">Source</label>
+							<input
+								id="dep-source"
+								type="text"
+								list="revenue-accounts-list"
+								bind:value={depositSource}
+								placeholder="Type or pick a source"
+								required
+								autocomplete="off"
+							/>
 						</div>
 
-						<!-- Description -->
 						<div class="field">
 							<label for="dep-description">Description <span class="optional">(optional)</span></label>
 							<input id="dep-description" type="text" bind:value={depositDescription} placeholder="e.g. Old bike" />
@@ -474,31 +448,6 @@
 		gap: 0.75rem;
 	}
 
-	/* Label row with action on the right */
-	.label-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-
-	.new-toggle {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		font-size: 0.8rem;
-		color: var(--color-muted);
-		font-weight: 400;
-		text-transform: none;
-		letter-spacing: 0;
-		cursor: pointer;
-	}
-
-	.new-toggle input[type='checkbox'] {
-		width: 0.875rem;
-		height: 0.875rem;
-		cursor: pointer;
-	}
-
 	.optional {
 		font-weight: 400;
 		text-transform: none;
@@ -506,7 +455,6 @@
 		font-size: 0.75rem;
 		color: var(--color-muted);
 	}
-
 
 	/* Items */
 	.items-list {
