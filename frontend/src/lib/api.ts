@@ -108,6 +108,31 @@ export async function submitDeposit(
 	return (await res.json()).firefly_transaction_id;
 }
 
+export interface OcrItem {
+	name: string;
+	price: number;
+	category: string | null;
+}
+
+export interface OcrResult {
+	store: string | null;
+	date: string | null;
+	total: number | null;
+	items: OcrItem[];
+}
+
+export async function ocrReceipt(file: File, categories: string[]): Promise<OcrResult> {
+	const form = new FormData();
+	form.append('file', file);
+	form.append('categories', JSON.stringify(categories));
+	const res = await fetch(`${BACKEND}/ocr`, { method: 'POST', body: form });
+	if (!res.ok) {
+		const body = await res.json().catch(() => null);
+		throw new Error(body?.detail ?? 'OCR failed');
+	}
+	return res.json();
+}
+
 export async function submitReceipt(
 	fireflyUrl: string,
 	token: string,

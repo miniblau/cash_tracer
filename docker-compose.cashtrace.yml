@@ -2,6 +2,8 @@ services:
   cashtrace-backend:
     build: ./backend
     restart: unless-stopped
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     networks:
       - cashtrace
       - firefly_iii  # shared with Firefly so backend can reach http://app:8080

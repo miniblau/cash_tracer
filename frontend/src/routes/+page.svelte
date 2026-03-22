@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/auth';
-	import { getCategories, getAccounts, getExpenseAccounts, getRevenueAccounts, createCategory, submitReceipt, submitDeposit } from '$lib/api';
+	import { getCategories, getAccounts, getExpenseAccounts, getRevenueAccounts, createCategory, submitReceipt, submitDeposit, ocrReceipt } from '$lib/api';
 	import type { Category, Account, ReceiptItem } from '$lib/api';
 
 	type Tab = 'out' | 'in';
@@ -40,6 +40,36 @@
 	let depositDescription = $state('');
 	let depositCategoryName = $state('');
 	let depositAccountId = $state('');
+
+	// --- OCR state ---
+	let scanning = $state(false);
+	let scanError = $state('');
+
+	async function scanReceipt(e: Event) {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		if (!file) return;
+		scanning = true; scanError = '';
+		try {
+			const result = await ocrReceipt(file, categories.map(c => c.name));
+			if (result.store) store = result.store;
+			if (result.date) date = result.date;
+			if (result.total != null) total = String(result.total);
+			if (result.items?.length) {
+				items = result.items.map(item => ({
+					id: nextId++,
+					name: item.name,
+					price: String(item.price),
+					category: categories.find(c => c.name === item.category)?.id ?? '',
+					personal: false,
+				}));
+			}
+		} catch (e) {
+			scanError = e instanceof Error ? e.message : 'Could not read receipt. Try a clearer photo.';
+		} finally {
+			scanning = false;
+			(e.target as HTMLInputElement).value = '';
+		}
+	}
 
 	// --- Shared submission state ---
 	let submitting = $state(false);
@@ -183,6 +213,19 @@
 					{/each}
 				</datalist>
 				<form onsubmit={(e) => { e.preventDefault(); submitOut(); }}>
+					<div class="scan-row">
+						<label class="btn btn-scan" class:loading={scanning}>
+							📷 Camera
+							<input type="file" accept="image/*" capture="environment" onchange={scanReceipt} hidden disabled={scanning} />
+						</label>
+						<label class="btn btn-scan" class:loading={scanning}>
+							📁 Upload
+							<input type="file" accept="image/*" onchange={scanReceipt} hidden disabled={scanning} />
+						</label>
+						{#if scanning}<span class="scan-status">Scanning…</span>{/if}
+						{#if scanError}<span class="scan-error">{scanError}</span>{/if}
+					</div>
+
 					<div class="card header-card">
 						<div class="field">
 							<label for="store">Store</label>
@@ -597,4 +640,35 @@
 
 	.btn-income { background: #16a34a; }
 	.btn-income:hover { background: #15803d; }
+
+	.scan-row {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.btn-scan {
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		color: var(--color-text);
+		cursor: pointer;
+		padding: 0.5rem 1rem;
+		border-radius: 0.5rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+	}
+
+	.btn-scan:hover { background: var(--color-border); }
+	.btn-scan.loading { opacity: 0.6; cursor: default; }
+
+	.scan-status {
+		font-size: 0.875rem;
+		color: var(--color-muted);
+	}
+
+	.scan-error {
+		color: var(--color-danger);
+		font-size: 0.875rem;
+	}
 </style>

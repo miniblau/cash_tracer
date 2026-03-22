@@ -3,12 +3,15 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+import json
+
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .firefly_client import FireflyClient, FireflyError
 from .models import Deposit, Receipt, ReceiptItem
+from .ocr import extract_receipt
 
 app = FastAPI(title="Cash Trace")
 
@@ -157,3 +160,19 @@ async def submit_deposit(
     )
     transaction_id = await client.push_deposit(deposit)
     return {"firefly_transaction_id": transaction_id}
+
+
+@app.post("/ocr")
+async def ocr_receipt(
+    file: UploadFile = File(...),
+    categories: str = Form(default="[]"),
+):
+    image_bytes = await file.read()
+    media_type = file.content_type or "image/jpeg"
+    try:
+        result = await extract_receipt(image_bytes, media_type, json.loads(categories))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"OCR failed: {e}")
+    return result

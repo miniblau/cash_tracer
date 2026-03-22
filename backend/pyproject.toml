@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "FastAPI backend for Cash Trace — receipt capture bridge for Firefly III"
 requires-python = ">=3.12"
 dependencies = [
+    "anthropic>=0.86.0",
     "fastapi>=0.135.1",
     "httpx>=0.28.1",
     "python-multipart>=0.0.22",

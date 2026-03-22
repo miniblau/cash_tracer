@@ -1,5 +1,7 @@
 services:
   cashtrace-backend:
+    environment:
+        - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     build: ./backend
     restart: unless-stopped
     networks:
