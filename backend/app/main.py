@@ -116,6 +116,15 @@ async def get_expense_accounts(client: FireflyClient = Depends(get_client)):
     return await client.get_expense_accounts()
 
 
+@app.get("/transactions")
+async def get_transactions(
+    page: int = 1,
+    limit: int = 10,
+    client: FireflyClient = Depends(get_client),
+):
+    return await client.get_transactions(page=page, limit=limit)
+
+
 @app.post("/receipt")
 async def submit_receipt(
     body: ReceiptSchema,

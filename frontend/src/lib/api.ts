@@ -133,6 +133,32 @@ export async function ocrReceipt(file: File, categories: string[]): Promise<OcrR
 	return res.json();
 }
 
+export interface Transaction {
+	id: string;
+	date: string;
+	description: string;
+	amount: string;
+	category: string;
+	source: string;
+	destination: string;
+	type: string;
+	tags: string[];
+}
+
+export async function getTransactions(
+	fireflyUrl: string,
+	token: string,
+	page: number = 1,
+	limit: number = 10
+): Promise<Transaction[]> {
+	const res = await fetch(
+		`${BACKEND}/transactions?firefly_url=${encodeURIComponent(fireflyUrl)}&page=${page}&limit=${limit}`,
+		{ headers: authHeaders(token) }
+	);
+	if (!res.ok) throw new Error('Failed to fetch transactions');
+	return res.json();
+}
+
 export async function submitReceipt(
 	fireflyUrl: string,
 	token: string,

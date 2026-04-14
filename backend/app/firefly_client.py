@@ -82,6 +82,30 @@ class FireflyClient:
         resp.raise_for_status()
         return resp.json()["data"]["id"]
 
+    async def get_transactions(self, page: int = 1, limit: int = 10) -> list[dict]:
+        """Returns recent transactions, newest first."""
+        resp = await self._get(f"/api/v1/transactions?page={page}&limit={limit}")
+        resp.raise_for_status()
+        results = []
+        for t in resp.json()["data"]:
+            splits = t["attributes"]["transactions"]
+            first = splits[0]
+            amount = f"{float(first['amount']):.2f}"
+            sign = "-" if first["type"] == "withdrawal" else "+"
+            tags = first.get("tags", [])
+            results.append({
+                "id": t["id"],
+                "date": first["date"][:10],
+                "description": first["description"],
+                "amount": f"{sign}{amount}",
+                "category": first.get("category_name", ""),
+                "source": first.get("source_name", ""),
+                "destination": first.get("destination_name", ""),
+                "type": first["type"],
+                "tags": tags,
+            })
+        return results
+
     async def push_deposit(self, deposit: Deposit) -> str:
         """Submits an income deposit to Firefly. Returns the transaction ID."""
         payload = {

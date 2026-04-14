@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/auth';
-	import { getCategories, getAccounts, getExpenseAccounts, getRevenueAccounts, createCategory, submitReceipt, submitDeposit, ocrReceipt } from '$lib/api';
-	import type { Category, Account, ReceiptItem } from '$lib/api';
+	import { getCategories, getAccounts, getExpenseAccounts, getRevenueAccounts, createCategory, submitReceipt, submitDeposit, ocrReceipt, getTransactions } from '$lib/api';
+	import type { Category, Account, ReceiptItem, Transaction } from '$lib/api';
 
-	type Tab = 'out' | 'in';
+	type Tab = 'out' | 'in' | 'history';
 
 	interface Item {
 		id: number;
@@ -40,6 +40,47 @@
 	let depositDescription = $state('');
 	let depositCategoryName = $state('');
 	let depositAccountId = $state('');
+
+	// --- History state ---
+	let transactions = $state<Transaction[]>([]);
+	let historyPage = $state(1);
+	let loadingHistory = $state(false);
+	let historyError = $state('');
+	let hasMore = $state(true);
+	let historySearch = $state('');
+	const filteredTransactions = $derived(
+		historySearch.trim()
+			? transactions.filter(t => {
+				const q = historySearch.trim().toLowerCase();
+				return t.description.toLowerCase().includes(q)
+					|| t.amount.includes(q)
+					|| t.category.toLowerCase().includes(q)
+					|| t.tags.some(tag => tag.toLowerCase().includes(q));
+			})
+			: transactions
+	);
+
+	async function loadHistory(reset = false) {
+		if (!$auth) return;
+		loadingHistory = true;
+		historyError = '';
+		if (reset) { historyPage = 1; transactions = []; hasMore = true; }
+		try {
+			const page = reset ? 1 : historyPage;
+			const batch = await getTransactions($auth.fireflyUrl, $auth.token, page, 10);
+			if (reset) {
+				transactions = batch;
+			} else {
+				transactions = [...transactions, ...batch];
+			}
+			hasMore = batch.length === 10;
+			historyPage = page + 1;
+		} catch {
+			historyError = 'Failed to load transactions.';
+		} finally {
+			loadingHistory = false;
+		}
+	}
 
 	// --- OCR state ---
 	let scanning = $state(false);
@@ -204,6 +245,9 @@
 				<button class="tab" class:active={tab === 'in'} onclick={() => { tab = 'in'; clearStatus(); }}>
 					In
 				</button>
+				<button class="tab" class:active={tab === 'history'} onclick={() => { tab = 'history'; clearStatus(); if (!transactions.length) loadHistory(true); }}>
+					History
+				</button>
 			</div>
 
 			{#if tab === 'out'}
@@ -333,7 +377,7 @@
 					</button>
 				</form>
 
-			{:else}
+			{:else if tab === 'in'}
 				<datalist id="revenue-accounts-list">
 					{#each revenueAccounts as acc}
 						<option value={acc.name} />
@@ -400,6 +444,50 @@
 						{submitting ? 'Saving…' : 'Save to Firefly'}
 					</button>
 				</form>
+
+			{:else if tab === 'history'}
+				{#if historyError}<p class="error">{historyError}</p>{/if}
+
+				<input
+					class="history-search"
+					type="text"
+					placeholder="Search description, amount, category..."
+					bind:value={historySearch}
+				/>
+
+				{#if transactions.length === 0 && !loadingHistory}
+					<p class="loading">No transactions found.</p>
+				{:else if filteredTransactions.length === 0 && historySearch.trim()}
+					<p class="loading">No matches.</p>
+				{/if}
+
+				<div class="history-list">
+					{#each filteredTransactions as txn (txn.id)}
+						<div class="card history-card">
+							<div class="history-top">
+								<span class="history-desc">{txn.description}</span>
+								<span class="history-amount" class:expense={txn.amount.startsWith('-')} class:income={txn.amount.startsWith('+')}>
+									{txn.amount} kr
+								</span>
+							</div>
+							<div class="history-bottom">
+								<span class="history-date">{txn.date}</span>
+								{#if txn.category}<span class="history-cat">{txn.category}</span>{/if}
+								{#if txn.tags.includes('personal')}
+									<span class="history-tag personal">personal</span>
+								{:else if txn.tags.includes('shared')}
+									<span class="history-tag shared">shared</span>
+								{/if}
+							</div>
+						</div>
+					{/each}
+				</div>
+
+				{#if hasMore}
+					<button class="btn btn-primary" onclick={() => loadHistory()} disabled={loadingHistory}>
+						{loadingHistory ? 'Loading...' : 'Load more'}
+					</button>
+				{/if}
 			{/if}
 		{/if}
 	</div>
@@ -449,7 +537,7 @@
 	/* Tabs */
 	.tabs {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: 1fr 1fr 1fr;
 		background: var(--color-surface);
 		border-radius: var(--radius);
 		box-shadow: var(--shadow);
@@ -636,6 +724,84 @@
 		font-size: 0.875rem;
 		font-weight: 500;
 		text-align: center;
+	}
+
+	/* History */
+	.history-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.history-card {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		padding: 0.75rem 1rem;
+	}
+
+	.history-top {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 0.5rem;
+	}
+
+	.history-desc {
+		font-weight: 500;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.history-amount {
+		font-weight: 700;
+		white-space: nowrap;
+	}
+
+	.history-amount.expense { color: var(--color-danger, #dc2626); }
+	.history-amount.income { color: #16a34a; }
+
+	.history-bottom {
+		display: flex;
+		gap: 0.75rem;
+		font-size: 0.8rem;
+		color: var(--color-muted);
+	}
+
+	.history-search {
+		width: 100%;
+		padding: 0.625rem 0.875rem;
+		border: 1.5px solid var(--color-border);
+		border-radius: var(--radius);
+		font-size: 0.9rem;
+		background: var(--color-surface);
+		color: var(--color-text);
+	}
+
+	.history-cat {
+		background: var(--color-border, #e5e7eb);
+		padding: 0.1rem 0.5rem;
+		border-radius: 0.25rem;
+		font-size: 0.75rem;
+	}
+
+	.history-tag {
+		padding: 0.1rem 0.5rem;
+		border-radius: 0.25rem;
+		font-size: 0.75rem;
+		font-weight: 500;
+	}
+
+	.history-tag.personal {
+		background: #ede9fe;
+		color: #7c3aed;
+	}
+
+	.history-tag.shared {
+		background: #dbeafe;
+		color: #2563eb;
 	}
 
 	.btn-income { background: #16a34a; }
